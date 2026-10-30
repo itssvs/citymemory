@@ -1,62 +1,10 @@
 import { useEffect, useState } from 'react'
-import { api, day, label, level, rupees, TYPE_ICON } from '../api'
+import { CircleCheck, Hammer, MessageSquareText, Sparkles, TriangleAlert, Wrench } from 'lucide-react'
+import { api, day, label, rupees } from '../api'
+import { CloseBtn, lakh, TYPE_NAME, TypeBadge, scoreTone } from '../ui'
+import WorkOrderCard from './WorkOrder'
 
-function CostCompare({ cost }) {
-  const max = Math.max(cost.patch_spend_total, cost.replacement_cost, 1)
-  const replace = cost.recommendation === 'replace'
-  return (
-    <div className={`reco ${replace ? 'reco-replace' : 'reco-patch'}`}>
-      <div className="reco-title">{replace ? 'Stop patching: plan a permanent fix' : cost.recommendation === 'patch' ? 'Patching is still reasonable' : 'Not enough repair history'}</div>
-      {cost.replacement_cost > 0 && (
-        <div className="bars">
-          <div className="bar-row">
-            <span>Spent on patches so far</span>
-            <div className="bar"><div style={{ width: `${(cost.patch_spend_total / max) * 100}%` }} className="fill warn" /></div>
-            <b>{rupees(cost.patch_spend_total)}</b>
-          </div>
-          <div className="bar-row">
-            <span>One permanent fix</span>
-            <div className="bar"><div style={{ width: `${(cost.replacement_cost / max) * 100}%` }} className="fill ok" /></div>
-            <b>{rupees(cost.replacement_cost)}</b>
-          </div>
-        </div>
-      )}
-      <p>{cost.message}</p>
-    </div>
-  )
-}
-
-function RepairForm({ assetId, onDone }) {
-  const [f, setF] = useState({ repair_type: 'temporary', cost: '', contractor: '', notes: '' })
-  const [err, setErr] = useState('')
-  const submit = async (e) => {
-    e.preventDefault()
-    setErr('')
-    try {
-      await api.repair({ ...f, cost: Number(f.cost), asset_id: assetId })
-      setF({ repair_type: 'temporary', cost: '', contractor: '', notes: '' })
-      onDone()
-    } catch (x) { setErr(x.message) }
-  }
-  return (
-    <form className="repair-form" onSubmit={submit}>
-      <h4>Log a repair</h4>
-      <div className="row">
-        <select value={f.repair_type} onChange={(e) => setF({ ...f, repair_type: e.target.value })}>
-          <option value="temporary">Temporary (patch)</option>
-          <option value="permanent">Permanent fix</option>
-        </select>
-        <input required type="number" min="0" placeholder="Cost (₹)" value={f.cost} onChange={(e) => setF({ ...f, cost: e.target.value })} />
-      </div>
-      <input required placeholder="Contractor" value={f.contractor} onChange={(e) => setF({ ...f, contractor: e.target.value })} />
-      <input placeholder="What was done" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
-      {err && <div className="error">{err}</div>}
-      <button className="btn">Save repair</button>
-    </form>
-  )
-}
-
-function AiSummary({ assetId, fallback, version }) {
+function Briefing({ assetId, fallback, version }) {
   const [s, setS] = useState(null)
   useEffect(() => {
     let live = true
@@ -65,108 +13,141 @@ function AiSummary({ assetId, fallback, version }) {
     return () => { live = false }
   }, [assetId, version])
   return (
-    <div className="summary">
-      <div className="summary-label">
-        {!s ? 'Writing briefing…' : s.source === 'llm' ? `AI briefing · ${s.model} · written only from the records below` : 'Briefing from records (AI model offline)'}
+    <section className="briefing">
+      <div className="briefing-label">
+        <Sparkles size={15} />
+        {!s ? 'Writing a briefing from the records…' : s.source === 'llm' ? `AI briefing by ${s.model}, written only from the records below` : 'Briefing from the records'}
       </div>
-      {s ? s.text : fallback}
-    </div>
+      <p>{s ? s.text : fallback}</p>
+    </section>
   )
 }
 
-export default function AssetPanel({ assetId, onClose, onChanged }) {
+function Verdict({ cost }) {
+  const replace = cost.recommendation === 'replace'
+  const fixed = cost.recommendation === 'fixed'
+  const max = Math.max(cost.patch_spend_total, cost.replacement_cost, 1)
+  const title = replace ? 'Stop patching. Plan a permanent fix.' : fixed ? 'Fixed permanently'
+    : cost.recommendation === 'patch' ? 'Patching is still reasonable' : 'Not enough repair history yet'
+  return (
+    <section className={`verdict ${replace ? 'replace' : fixed ? 'fixed' : ''}`}>
+      <div className="verdict-title">{replace ? <TriangleAlert size={18} color="#f8d44c" /> : <CircleCheck size={18} />}{title}</div>
+      {cost.replacement_cost > 0 && (
+        <div className="cmp">
+          <div className="cmp-row"><span>Spent on patches so far</span><div className="cmp-bar"><i className="coral" style={{ width: `${(cost.patch_spend_total / max) * 100}%` }} /></div><b className="num">{rupees(cost.patch_spend_total)}</b></div>
+          <div className="cmp-row"><span>One permanent fix</span><div className="cmp-bar"><i className="yellow" style={{ width: `${(cost.replacement_cost / max) * 100}%` }} /></div><b className="num">{rupees(cost.replacement_cost)}</b></div>
+        </div>
+      )}
+      <p className={replace ? 'muted' : 'sub'}>{cost.message}</p>
+    </section>
+  )
+}
+
+export default function AssetPanel({ assetId, onClose, canEdit = false, onChanged }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [version, setVersion] = useState(0)
   const load = () => api.asset(assetId).then((r) => { setD(r); setVersion((v) => v + 1) }).catch((e) => setErr(e.message))
-  useEffect(() => { setD(null); load() }, [assetId])
+  useEffect(() => { setD(null); setErr(''); load() }, [assetId])
+  const changed = () => { load(); onChanged && onChanged() }
 
-  if (err) return <div className="panel"><div className="error">{err}</div></div>
-  if (!d) return <div className="panel muted">Loading {assetId}…</div>
-  const a = d.asset
-  const p = d.priority
+  if (err) return <><div className="drawer-head"><span /><CloseBtn onClick={onClose} /></div><div className="error-box">{err}</div></>
+  if (!d) return <><div className="drawer-head"><p className="muted">Loading {assetId}…</p><CloseBtn onClick={onClose} /></div></>
+  const a = d.asset, p = d.priority
+  const tone = scoreTone(p.score)
   return (
-    <div className="panel asset-panel">
-      <div className="panel-head">
-        <div>
-          <div className="asset-id">{a.asset_id} · {TYPE_ICON[a.type]}{!a.registered && <span className="tag">unregistered</span>}</div>
-          <h2>{a.name}</h2>
-        </div>
-        <button className="icon-btn" onClick={onClose} aria-label="Close">×</button>
-      </div>
-
-      <div className="kpis">
-        <div><b>{d.stats.incidents}</b><span>failures</span></div>
-        <div><b>{d.stats.complaints}</b><span>complaints</span></div>
-        <div><b>{d.stats.repairs}</b><span>repairs</span></div>
-        <div className={`score ${level(p.score)}`}><b>{p.score}</b><span>priority</span></div>
-      </div>
-      {d.stats.recurring && <div className="flag">Recurring: {d.stats.incidents_12m} failures in the last 12 months</div>}
-
-      <AiSummary assetId={a.asset_id} fallback={d.summary} version={version} />
-
-      <CostCompare cost={d.cost} />
-
-      <h4>Why it ranks here</h4>
-      <div className="breakdown">
-        {p.components.map((c) => (
-          <div key={c.name} className="bd-row">
-            <span className="bd-name">{c.name}</span>
-            <div className="bar"><div className="fill" style={{ width: `${Math.min(100, (c.points / 35) * 100)}%` }} /></div>
-            <span className="bd-pts">{c.points}</span>
-            <div className="bd-reason">{c.reason}</div>
+    <>
+      <div className="drawer-head">
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <TypeBadge type={a.type} tone={tone === 'high' ? 'hot' : tone === 'mid' ? 'warm' : ''} />
+          <div>
+            <p className="muted small">{a.asset_id}, {TYPE_NAME[a.type]}{a.registered ? '' : ' (not yet verified)'}</p>
+            <h2 className="h-card">{a.name}</h2>
           </div>
-        ))}
+        </div>
+        <CloseBtn onClick={onClose} />
       </div>
 
-      <div className="two">
-        <div>
-          <h4>Likely cause</h4>
-          <div className="chips">
+      <div className="kpi-row">
+        <div className={`kpi ${tone === 'high' ? 'coral' : tone === 'mid' ? 'yellow' : ''}`}><b className="num">{p.score}</b><span>priority of 100</span></div>
+        <div className="kpi"><b className="num">{d.stats.incidents}</b><span>failures in total</span></div>
+        <div className="kpi"><b className="num">{d.stats.complaints}</b><span>complaints</span></div>
+        <div className="kpi"><b className="num">{d.stats.repairs}</b><span>repairs</span></div>
+      </div>
+      {d.stats.recurring && <div className="callout">Failing repeatedly: {d.stats.incidents_12m} separate failures in the last 12 months.</div>}
+
+      <Briefing assetId={a.asset_id} fallback={d.summary} version={version} />
+      <Verdict cost={d.cost} />
+      <WorkOrderCard asset={a} wo={d.work_order} history={d.work_orders} recommendation={d.cost.recommendation}
+        targetDays={d.target_days} canEdit={canEdit} onChanged={changed} />
+
+      <section className="card">
+        <h3 className="h-section" style={{ marginBottom: 14 }}>Why it ranks here</h3>
+        <div className="why">
+          {p.components.map((c) => (
+            <div key={c.name} className="why-row">
+              <span>{c.name}</span>
+              <div className="bar"><i style={{ width: `${Math.min(100, (c.points / 35) * 100)}%` }} /></div>
+              <b className="num">{c.points}</b>
+              <small>{c.reason}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="two-col">
+        <section className="card">
+          <h3 className="h-section" style={{ marginBottom: 10 }}>Likely cause</h3>
+          <div className="chip-row">
             {Object.entries(d.cause.counts).length
-              ? Object.entries(d.cause.counts).map(([k, v]) => <span key={k} className={`chip ${k === d.cause.primary ? 'chip-main' : ''}`}>{label(k)} · {v}</span>)
+              ? Object.entries(d.cause.counts).map(([k, v]) => <span key={k} className={`tag ${k === d.cause.primary ? 'dark' : ''}`}>{label(k)} ({v})</span>)
               : <span className="muted">No cause signals yet</span>}
           </div>
-          <div className="muted small source-note">
-            {d.cause.sources?.llm ? `${d.cause.sources.llm} of ${d.stats.complaints} complaints tagged by the AI model` : 'Tagged by keyword rules (AI model offline)'}
-          </div>
-        </div>
-        <div>
-          <h4>Next failure window</h4>
+          <p className="note" style={{ marginTop: 10 }}>
+            {d.cause.sources?.llm ? `${d.cause.sources.llm} of ${d.stats.complaints} complaints tagged by the AI model` : 'Tagged by keyword rules'}
+          </p>
+        </section>
+        <section className="card">
+          <h3 className="h-section" style={{ marginBottom: 10 }}>Next likely failure</h3>
           {d.failure_window.available
-            ? <p className="window">{day(d.failure_window.earliest)} to {day(d.failure_window.latest)}<br /><small>avg gap {d.failure_window.mean_gap_days} days · estimate, not a forecast</small></p>
-            : <p className="muted">{d.failure_window.reason}</p>}
-        </div>
+            ? <><p className="strong">{day(d.failure_window.earliest)} to {day(d.failure_window.latest)}</p><p className="note">Based on an average gap of {d.failure_window.mean_gap_days} days. An estimate, not a forecast.</p></>
+            : <p className="muted">Needs at least three past failures.</p>}
+        </section>
       </div>
 
-      <h4>Timeline</h4>
-      <ol className="timeline">
-        {d.timeline.map((e) => (
-          <li key={e.kind + e.id} className={e.kind}>
-            <div className="t-date">{day(e.date)}</div>
-            {e.kind === 'complaint' ? (
-              <div className="t-body">
-                <span className="t-kind">Complaint</span> {e.text}
-                {e.cause && e.cause !== 'unknown' && (
-                  <span className={`chip small ${e.cause_source === 'llm' ? 'chip-ai' : ''}`} title={`${e.cause_source === 'llm' ? 'AI' : 'Keyword rule'}: ${e.cause_reason || ''}`}>
-                    {label(e.cause)}{e.cause_source === 'llm' ? ' · AI' : ''}
-                  </span>
+      <section>
+        <h3 className="h-section" style={{ marginBottom: 12 }}>History</h3>
+        <ol className="timeline">
+          {d.timeline.map((e) => (
+            <li key={e.kind + e.id}>
+              {e.kind === 'complaint'
+                ? <span className="tl-ic"><MessageSquareText size={16} /></span>
+                : <span className={`tl-ic ${e.repair_type === 'permanent' ? 'permanent' : 'repair'}`}>{e.repair_type === 'permanent' ? <Hammer size={16} /> : <Wrench size={16} />}</span>}
+              <div>
+                <p className="tl-meta">{day(e.date)}, {e.kind === 'complaint' ? 'complaint' : e.repair_type === 'permanent' ? 'permanent fix' : 'patch'}</p>
+                {e.kind === 'complaint' ? (
+                  <>
+                    <p className="tl-text">{e.text}</p>
+                    <div className="tags">
+                      {e.cause && e.cause !== 'unknown' && <span className="tag" title={e.cause_reason || ''}>{label(e.cause)}{e.cause_source === 'llm' ? ', AI tagged' : ''}</span>}
+                      {e.match_status === 'review' && <span className="tag yellow">Waiting for review</span>}
+                    </div>
+                    {e.photo_url && <img src={api.photo(e.photo_url)} alt="Photo attached to the complaint" className="thumb" />}
+                  </>
+                ) : (
+                  <>
+                    <p className="tl-text">{e.notes || 'Repair'}, by {e.contractor}, {lakh(e.cost)}</p>
+                    <p className={`tl-lasted ${e.lasted_days != null ? 'bad' : 'ok'}`}>
+                      {e.lasted_days != null ? `Failed again after ${e.lasted_days} days` : 'Holding so far'}
+                    </p>
+                    {e.after_photo_url && <img src={api.photo(e.after_photo_url)} alt="Photo after the repair" className="thumb" />}
+                  </>
                 )}
-                {e.match_status === 'review' && <span className="tag">needs review</span>}
-                {e.photo_url && <img src={api.photo(e.photo_url)} alt="complaint" className="thumb" />}
               </div>
-            ) : (
-              <div className="t-body">
-                <span className={`t-kind ${e.repair_type}`}>{e.repair_type === 'permanent' ? 'Permanent fix' : 'Patch'}</span>
-                {' '}{e.notes} · {e.contractor} · {rupees(e.cost)}
-                <div className="lasted">{e.lasted_days != null ? `Failed again after ${e.lasted_days} days` : 'Holding so far'}</div>
-              </div>
-            )}
-          </li>
-        ))}
-      </ol>
-
-      <RepairForm assetId={a.asset_id} onDone={() => { load(); onChanged && onChanged() }} />
-    </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </>
   )
 }

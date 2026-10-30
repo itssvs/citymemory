@@ -18,12 +18,27 @@ import seed
 from db import get_conn
 
 client = TestClient(main.app)
+
+DEMO = {"citizen": ("citizen001", "citizen@123"), "engineer": ("engineer", "engineer@123"),
+        "commissioner": ("commissioner", "commissioner@123")}
+
+
+def as_role(role):
+    """A test client logged in as the demo user for that role."""
+    c = TestClient(main.app)
+    u, p = DEMO[role]
+    r = c.post("/api/auth/login", json={"username": u, "password": p})
+    assert r.status_code == 200, r.text
+    c.headers.update({"Authorization": f"Bearer {r.json()['token']}"})
+    return c
 HERO = "ROAD-2045"
 
 
 @pytest.fixture(autouse=True)
 def fresh_db():
     seed.build(keep_cache=False)
+    global eng
+    eng = as_role("engineer")
 
 
 @pytest.fixture
@@ -42,7 +57,7 @@ def fake_llm(monkeypatch):
 
 
 def test_health_reports_ai_status():
-    h = client.get("/api/health").json()
+    h = eng.get("/api/health").json()
     assert h["ai"]["embedder"]["backend"] in ("sbert", "hash", "tfidf")
     assert h["ai"]["llm"]["available"] is False
 
@@ -57,8 +72,8 @@ def test_embeddings_stored_for_every_complaint():
 
 
 def test_new_complaint_gets_embedding_and_rule_cause_without_llm():
-    a = client.get(f"/api/assets/{HERO}").json()["asset"]
-    r = client.post("/api/complaints", data={"text": "pothole full of water near the bus stop, drain blocked",
+    a = eng.get(f"/api/assets/{HERO}").json()["asset"]
+    r = eng.post("/api/complaints", data={"text": "pothole full of water near the bus stop, drain blocked",
                                              "category": "road", "lat": a["lat"], "lng": a["lng"]}).json()
     conn = get_conn()
     row = conn.execute("SELECT cause, cause_source, embedding FROM complaints WHERE id=?", (r["complaint_id"],)).fetchone()
@@ -85,7 +100,7 @@ def test_llm_cause_outside_the_list_falls_back_to_rules(fake_llm):
 
 def test_summary_with_invented_number_is_rejected(fake_llm):
     fake_llm["reply"] = "This road failed 99 times and cost Rs 12345678."
-    out = client.get(f"/api/assets/{HERO}/ai-summary").json()
+    out = eng.get(f"/api/assets/{HERO}/ai-summary").json()
     assert out["source"] == "template"
 
 
@@ -98,12 +113,12 @@ def test_summary_using_only_record_numbers_is_accepted(fake_llm):
                 f"Patching has cost Rs {f['patch_spend_rupees']:,}. Plan a permanent fix.")
 
     fake_llm["reply"] = reply
-    out = client.get(f"/api/assets/{HERO}/ai-summary").json()
+    out = eng.get(f"/api/assets/{HERO}/ai-summary").json()
     assert out["source"] == "llm" and "Plan a permanent fix" in out["text"]
 
 
 def test_patterns_find_cross_asset_drainage_cluster():
-    res = client.get("/api/patterns").json()
+    res = eng.get("/api/patterns").json()
     assert res["patterns"], res
     drainage = [p for p in res["patterns"] if p["cross_type"]]
     assert drainage, "expected a pattern spanning roads and drains"
@@ -113,7 +128,7 @@ def test_patterns_find_cross_asset_drainage_cluster():
 
 def test_pattern_labels_from_llm(fake_llm):
     fake_llm["reply"] = {"label": "Drain overflow damaging roads", "description": "Blocked drains flood nearby roads."}
-    res = client.get("/api/patterns").json()
+    res = eng.get("/api/patterns").json()
     assert any(p["label"] == "Drain overflow damaging roads" and p["label_source"] == "llm" for p in res["patterns"])
 
 

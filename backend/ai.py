@@ -10,7 +10,7 @@ import json
 import re
 
 import llm
-from causes import CAUSES, tag_cause
+from causes import CAUSES, allowed_causes, tag_cause
 from db import now, one
 
 CAUSE_HELP = {
@@ -43,10 +43,11 @@ def cache_put(conn, key, value):
 def tag_complaint(conn, text: str, clean_text: str, category: str):
     """Return (cause, reason, source) where source is 'llm' or 'rules'."""
     key = _key("cause", llm.MODEL, text, category)
+    allowed = allowed_causes(category)
     hit = cache_get(conn, key)
-    if hit:
+    if hit and hit["cause"] in allowed:
         return hit["cause"], hit["reason"], "llm"
-    choices = "\n".join(f"- {c}: {CAUSE_HELP[c]}" for c in CAUSES)
+    choices = "\n".join(f"- {c}: {CAUSE_HELP[c]}" for c in allowed)
     system = (
         "You classify civic infrastructure complaints for a municipal engineering team in India. "
         "Choose the single most likely ROOT CAUSE from the allowed list only. "
@@ -55,7 +56,7 @@ def tag_complaint(conn, text: str, clean_text: str, category: str):
     user = f"Asset type: {category}\nAllowed causes:\n{choices}\n\nComplaint: \"{text}\""
     out = llm.chat(system, user, as_json=True, max_tokens=80)
     cause = (out or {}).get("cause", "").strip().lower().replace(" ", "_") if isinstance(out, dict) else ""
-    if cause in CAUSES:
+    if cause in allowed:
         reason = str(out.get("reason", "")).strip()[:160] or "model gave no reason"
         cache_put(conn, key, {"cause": cause, "reason": reason})
         return cause, reason, "llm"
@@ -89,7 +90,8 @@ def _facts(asset, s):
         "most_likely_cause": s["cause"]["primary"].replace("_", " "),
         "average_days_a_repair_lasted": round(sum(lasted) / len(lasted)) if lasted else None,
         "recommendation": {"replace": "plan a permanent fix instead of another patch",
-                           "patch": "patching is still reasonable", "monitor": "monitor"}[s["cost"]["recommendation"]],
+                           "patch": "patching is still reasonable", "monitor": "monitor",
+                           "fixed": "already fixed permanently; keep monitoring"}.get(s["cost"]["recommendation"], "monitor"),
         "priority_score_out_of_100": s["priority"]["score"],
         "recent_complaints": [c["text"] for c in s["complaints"][-4:]],
     }

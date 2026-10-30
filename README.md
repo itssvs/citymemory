@@ -22,13 +22,36 @@ to stop patching and plan a permanent fix.
 Extra: a **prediction check** that hides each asset's latest failure and tests whether the estimated
 window caught it.
 
-## How a complaint flows
+## Roles and login
+
+Three dashboards, each behind a login. The API checks the role on every request, so hiding a screen is
+not the only protection.
+
+| Role | Sees and does | Demo login |
+| --- | --- | --- |
+| Citizen | Report an issue (photo, text, map pin); **My complaints** with progress and whether the spot has failed before. Cannot see priorities, costs or other people's complaints. | `citizen001` / `citizen@123` |
+| Ward engineer | **Work queue** (map, ranked assets, full asset history, AI briefing, patch-or-replace), **Review queue** for uncertain matches, **Patterns**, search | `engineer` / `engineer@123` |
+| Commissioner | **Overview** (spend, stop-patching decision with pay-back, complaints per month, contractor accountability), read-only assets, patterns, contractors, prediction check | `commissioner` / `commissioner@123` |
+
+- Citizens can create their own accounts; engineer and commissioner accounts are created by the city (seeded here).
+- Passwords are hashed (PBKDF2-SHA256). Login returns a session token (12 hours), sent as `Authorization: Bearer <token>`.
+- Demo passwords are for the prototype only.
+
+
 
 `receive → clean → duplicate check → find nearby assets of the same type → compare text with their history → link (auto / engineer review / new asset) → store → cause tag + rescore in the background`
 
 - Combined match score = 0.6 × location closeness + 0.4 × text similarity.
 - ≥ 0.62 links automatically, 0.38–0.62 goes to engineer review, below that creates an unregistered asset.
 - Settings live at the top of `backend/logic.py`.
+
+## Design
+
+Warm beige canvas, white / taupe / charcoal cards, yellow and coral accents, Manrope (bundled, works offline).
+Each role's home has one taupe "bubble" card for its headline numbers (bubble area follows the value; zero is a
+dashed outline), a dark calendar of complaints and repairs, a gauge, a pill progress bar and a ranked list.
+Asset history opens in a slide-over panel. Demo users: Priya Sharma (citizen), Arjun Rao (engineer),
+Meena Iyer (commissioner).
 
 ## Run it locally
 
@@ -41,7 +64,7 @@ cd backend
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python seed.py                 # creates citymemory.db with simulated data
+python seed.py                 # creates citymemory.db with simulated data and demo accounts
 uvicorn main:app --reload --port 8000
 ```
 
@@ -66,7 +89,8 @@ FastAPI serves the built app at http://localhost:8000.
 
 ```
 backend/
-  main.py       FastAPI endpoints
+  main.py       FastAPI endpoints (each one checks the caller's role)
+  auth.py       users, password hashing, sessions, role checks
   logic.py      cleaning, matching, incidents, priority, cost comparison, failure window, back-test
   textsim.py    text normalisation, sentence embeddings, TF-IDF fallback
   patterns.py   ward-wide clustering of complaints by meaning
@@ -78,14 +102,23 @@ backend/
   seed.py       simulated demo data
   test_api.py   tests
 frontend/
-  src/App.jsx              layout, dashboard, priority queue
-  src/components/          map, asset panel, report form, review/contractor/insight views
+  src/App.jsx              login gate; picks the dashboard for the user's role
+  src/ui.jsx               design-system pieces: shell + sidebar, bubble card, calendar, gauge, progress, drawer
+  src/index.css            design tokens and all styles
+  src/pages/               Login, CitizenApp, EngineerApp, CommissionerApp, staff.jsx (shared lists, map, drawer)
+  src/components/          map, asset detail, report form, patterns, review/contractor/prediction views
 ```
 
 ## Key API endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| POST | `/api/auth/login` · `/api/auth/register` · `/api/auth/logout` | Login, citizen sign-up, logout |
+| GET | `/api/me/complaints` | Citizen: own complaints with status |
+| GET | `/api/overview` | Commissioner: ward spend and decisions |
+| POST | `/api/assets/{id}/work-orders` | Engineer: assign a repair (contractor, type, target date) |
+| POST | `/api/work-orders/{id}/start` · `/complete` | Engineer: mark work started; mark fixed with cost and after photo |
+| GET | `/api/work-orders?status=open` | Repair jobs, overdue first |
 | POST | `/api/complaints` | Submit a complaint (form data: text, category, lat, lng, reporter?, photo?) |
 | GET | `/api/priority` | Ranked assets |
 | GET | `/api/assets/{id}` | Timeline, priority breakdown, cause, cost comparison, failure window |
@@ -129,7 +162,7 @@ uvicorn main:app --port 8000
 ```
 
 The header badge shows what is live: `AI: embeddings on · LLM on (llama3.2:3b)`.
-The Reset button rebuilds demo data but keeps the cached AI answers.
+`python seed.py` rebuilds the demo data but keeps cached AI answers and user accounts.
 
 ### Use a cloud LLM instead of Ollama
 

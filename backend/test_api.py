@@ -10,34 +10,46 @@ import main
 import seed
 
 client = TestClient(main.app)
+
+DEMO = {"citizen": ("citizen001", "citizen@123"), "engineer": ("engineer", "engineer@123"),
+        "commissioner": ("commissioner", "commissioner@123")}
+
+
+def as_role(role):
+    """A test client logged in as the demo user for that role."""
+    c = TestClient(main.app)
+    u, p = DEMO[role]
+    r = c.post("/api/auth/login", json={"username": u, "password": p})
+    assert r.status_code == 200, r.text
+    c.headers.update({"Authorization": f"Bearer {r.json()['token']}"})
+    return c
 HERO = "ROAD-2045"
 
 
 @pytest.fixture(autouse=True)
 def fresh_db():
     seed.build()
+    global eng, cit
+    eng, cit = as_role("engineer"), as_role("citizen")
 
 
 def hero_pos():
-    a = client.get(f"/api/assets/{HERO}").json()["asset"]
+    a = eng.get(f"/api/assets/{HERO}").json()["asset"]
     return a["lat"], a["lng"]
 
 
-def post(text, category="road", lat=None, lng=None, reporter=None):
-    data = {"text": text, "category": category, "lat": lat, "lng": lng}
-    if reporter:
-        data["reporter"] = reporter
-    return client.post("/api/complaints", data=data)
+def post(text, category="road", lat=None, lng=None, who=None):
+    return (who or eng).post("/api/complaints", data={"text": text, "category": category, "lat": lat, "lng": lng, "consent": "true"})
 
 
 def test_hero_is_recurring_and_recommended_for_replacement():
-    d = client.get(f"/api/assets/{HERO}").json()
+    d = eng.get(f"/api/assets/{HERO}").json()
     assert d["stats"]["recurring"] is True
     assert d["cause"]["primary"] == "drainage"
     assert d["cost"]["recommendation"] == "replace"
     assert d["failure_window"]["available"] is True
     assert len(d["priority"]["components"]) == 5
-    ranked = [a["asset_id"] for a in client.get("/api/priority?limit=3").json()]
+    ranked = [a["asset_id"] for a in eng.get("/api/priority?limit=3").json()]
     assert HERO in ranked
 
 
@@ -69,7 +81,7 @@ def test_far_away_complaint_creates_unregistered_asset():
     body = post("new pothole on the service lane", lat=lat + 0.02, lng=lng + 0.02).json()
     assert body["status"] == "new_asset"
     assert body["asset_id"].startswith("ROAD-")
-    assert any(c["id"] == body["complaint_id"] for c in client.get("/api/review").json())
+    assert any(c["id"] == body["complaint_id"] for c in eng.get("/api/review").json())
 
 
 def test_category_filter_keeps_drain_and_road_apart():
@@ -80,8 +92,8 @@ def test_category_filter_keeps_drain_and_road_apart():
 
 def test_same_reporter_duplicate_is_not_stored_twice():
     lat, lng = hero_pos()
-    first = post("pothole near the bus stop again after rain", lat=lat, lng=lng, reporter="tester").json()
-    second = post("pothole near bus stop again after the rain", lat=lat, lng=lng, reporter="tester").json()
+    first = post("pothole near the bus stop again after rain", lat=lat, lng=lng, who=cit).json()
+    second = post("pothole near bus stop again after the rain", lat=lat, lng=lng, who=cit).json()
     assert second["status"] == "duplicate"
     assert second["complaint_id"] == first["complaint_id"]
 
@@ -90,28 +102,28 @@ def test_review_reassign_and_cleanup():
     lat, lng = hero_pos()
     body = post("new pothole on the service lane", lat=lat + 0.02, lng=lng + 0.02).json()
     placeholder = body["asset_id"]
-    r = client.post(f"/api/complaints/{body['complaint_id']}/review", json={"action": "reassign", "asset_id": HERO})
+    r = eng.post(f"/api/complaints/{body['complaint_id']}/review", json={"action": "reassign", "asset_id": HERO})
     assert r.json()["asset_id"] == HERO
-    assert client.get(f"/api/assets/{placeholder}").status_code == 404
+    assert eng.get(f"/api/assets/{placeholder}").status_code == 404
 
 
 def test_logging_a_repair_appears_on_timeline():
-    r = client.post("/api/repairs", json={"asset_id": HERO, "repair_type": "permanent", "cost": 580000,
+    r = eng.post("/api/repairs", json={"asset_id": HERO, "repair_type": "permanent", "cost": 580000,
                                           "contractor": "Contractor B", "notes": "full reconstruction with drain"})
     assert r.status_code == 200
-    tl = client.get(f"/api/assets/{HERO}").json()["timeline"]
+    tl = eng.get(f"/api/assets/{HERO}").json()["timeline"]
     assert tl[0]["kind"] == "repair" and tl[0]["repair_type"] == "permanent"
 
 
 def test_search_finds_history():
-    res = client.get("/api/search", params={"q": "drain overflowing"}).json()
+    res = eng.get("/api/search", params={"q": "drain overflowing"}).json()
     assert res and any(r["kind"] == "complaint" for r in res)
 
 
 def test_contractors_and_backtest():
-    cs = client.get("/api/contractors").json()
+    cs = eng.get("/api/contractors").json()
     a = next(c for c in cs if c["contractor"] == "Contractor A")
     b = next(c for c in cs if c["contractor"] == "Contractor B")
     assert a["avg_days_lasted"] < b["avg_days_lasted"]
-    bt = client.get("/api/backtest").json()
+    bt = eng.get("/api/backtest").json()
     assert bt["tested_assets"] > 0 and 0 <= bt["hit_rate"] <= 1

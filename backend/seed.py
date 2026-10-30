@@ -110,27 +110,31 @@ def jitter(m=12):
     return (random.uniform(-m, m) / 111000.0, random.uniform(-m, m) / 109000.0)
 
 
-def _saved_cache():
-    """LLM answers are slow to produce; keep them when the demo data is rebuilt."""
-    if not os.path.exists(DB_PATH):
-        return []
+def _clear(conn, keep_cache):
+    """Empty the demo data in place. The file is never deleted, so this works even while the
+    server (or anything else on Windows) has the database open. Accounts and cached AI answers
+    are kept unless keep_cache=False."""
+    conn.execute("PRAGMA foreign_keys=OFF")
+    for table in ("work_orders", "complaints", "repairs", "assets"):
+        conn.execute(f"DELETE FROM {table}")
+    if not keep_cache:
+        for table in ("llm_cache", "sessions", "users"):
+            conn.execute(f"DELETE FROM {table}")
     try:
-        c = sqlite3.connect(DB_PATH)
-        out = c.execute("SELECT key, value, model, created_at FROM llm_cache").fetchall()
-        c.close()
-        return out
-    except sqlite3.Error:
-        return []
+        conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('complaints', 'repairs', 'work_orders')")
+    except sqlite3.OperationalError:
+        pass  # no AUTOINCREMENT rows written yet
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def build(keep_cache=True):
-    cache = _saved_cache() if keep_cache else []
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
     init_db()
     conn = get_conn()
-    if cache:
-        conn.executemany("INSERT OR REPLACE INTO llm_cache VALUES (?,?,?,?)", cache)
+    _clear(conn, keep_cache)
+    import auth
+
+    auth.seed_demo_users(conn)
     t_now = now()
 
     for (aid, typ, name, dlat, dlng, inst, life, repl, cause, n_inc, gap, mix, last_open, perm_at) in ASSETS:
@@ -151,7 +155,8 @@ def build(keep_cache=True):
 
         for idx, st in enumerate(starts):
             for k in range(random.randint(1, 4) if aid in ("ROAD-2045", "DRAIN-1120") else random.randint(1, 3)):
-                created = st + timedelta(days=random.randint(0, 6), hours=random.randint(7, 21))
+                created = min(st + timedelta(days=random.randint(0, 6), hours=random.randint(7, 21)),
+                              t_now - timedelta(hours=random.randint(2, 30)))
                 text = random.choice(texts)
                 clean = normalise(text)
                 c_tag, c_reason = tag_cause(clean, typ)
@@ -159,14 +164,15 @@ def build(keep_cache=True):
                 conn.execute(
                     "INSERT INTO complaints (asset_id,text,clean_text,category,lat,lng,photo_url,created_at,reporter,"
                     "severity,cause,cause_reason,cause_source,match_score,match_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (aid, text, clean, typ, lat + jl, lng + jg, None, created.isoformat(), random.choice(REPORTERS),
+                    (aid, text, clean, typ, lat + jl, lng + jg, None, created.isoformat(),
+                     "citizen001" if (aid in ("ROAD-2045", "LIGHT-778") and k == 0 and idx % 3 == 0) else random.choice(REPORTERS),
                      severity_from_text(clean), c_tag, c_reason, "rules", None, "seeded"),
                 )
             is_last = idx == len(starts) - 1
             if is_last and last_open:
                 continue  # still unresolved
             contractor = mix[idx % len(mix)]
-            done = st + timedelta(days=random.randint(5, 15))
+            done = min(st + timedelta(days=random.randint(5, 15)), t_now - timedelta(days=1))
             if perm_at is not None and idx == perm_at - 1:
                 rtype, cost = "permanent", repl * random.uniform(0.85, 1.0)
                 note = "full resurfacing with drainage correction"
@@ -184,6 +190,7 @@ def build(keep_cache=True):
                 (aid, rtype, round(cost, -2), done.isoformat(), CONTRACTORS[contractor], note),
             )
     conn.commit()
+    _demo_work(conn, t_now)
     _apply_cached_ai(conn)
     import logic
 
@@ -193,13 +200,33 @@ def build(keep_cache=True):
     return n
 
 
+def _demo_work(conn, t_now):
+    """A few jobs already under way, so every work-order state is visible. ROAD-2045 is left unassigned
+    so it can be assigned live in a demo. The demo citizen's latest reports sit on assets with open issues."""
+    d = lambda days: (t_now + timedelta(days=days))
+    demo = [
+        ("LIGHT-778", "assigned", "Electrical Contractor D", "temporary", d(1).date(), d(-1), None, "Replace fused bulb and check wiring"),
+        ("DRAIN-1120", "in_progress", "Contractor C", "temporary", d(-2).date(), d(-5), d(-3), "Desilt drain beside the bus stop"),
+        ("ROAD-2046", "assigned", "Contractor B", "permanent", d(6).date(), d(-1), None, "Full resurfacing of the junction"),
+    ]
+    for aid, status, contractor, rtype, due, created, started, notes in demo:
+        conn.execute("INSERT INTO work_orders (asset_id,status,contractor,repair_type,due_date,notes,created_by,created_at,started_at) "
+                     "VALUES (?,?,?,?,?,?,?,?,?)",
+                     (aid, status, contractor, rtype, due.isoformat(), notes, "engineer", created.isoformat(),
+                      started.isoformat() if started else None))
+    for aid in ("ROAD-2045", "LIGHT-778"):
+        conn.execute("UPDATE complaints SET reporter='citizen001' WHERE id=(SELECT id FROM complaints WHERE asset_id=? "
+                     "ORDER BY created_at DESC LIMIT 1)", (aid,))
+    conn.commit()
+
+
 def _apply_cached_ai(conn):
     """Reuse cause tags the LLM already produced for the same text (no LLM call here)."""
     import ai
 
     for cid, text, clean, cat in conn.execute("SELECT id, text, clean_text, category FROM complaints").fetchall():
         hit = ai.cache_get(conn, ai._key("cause", ai.llm.MODEL, text, cat))
-        if hit:
+        if hit and hit["cause"] in ai.allowed_causes(cat):
             conn.execute("UPDATE complaints SET cause=?, cause_reason=?, cause_source='llm' WHERE id=?",
                          (hit["cause"], hit["reason"], cid))
     conn.commit()

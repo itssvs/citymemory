@@ -78,7 +78,7 @@ def find_patterns(conn, use_llm=True):
         recent = sum(1 for m in members if logic.parse(m["created_at"]) >= t - timedelta(days=90))
         before = sum(1 for m in members if t - timedelta(days=180) <= logic.parse(m["created_at"]) < t - timedelta(days=90))
         kw = _keywords([m["clean_text"] or "" for m in members])
-        fallback = " / ".join(kw) if kw else "similar complaints"
+        fallback = (", ".join(kw).capitalize()) if kw else "Similar complaints"
         if use_llm:
             label, desc, label_source = ai.pattern_label(conn, examples, fallback)
         else:

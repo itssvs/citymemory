@@ -24,15 +24,24 @@ _KEYWORDS = {
     "wear_and_age": r"crack|old|worn|uneven|tile|broken|sinking|slab|cover",
 }
 
-_ORDER = ["drainage", "utility_digging", "heavy_load", "poor_patch_material", "electrical_fault", "wear_and_age"]
+# which causes can apply to which asset type, in the order they are checked
+_ORDER = {
+    "road": ["drainage", "utility_digging", "heavy_load", "poor_patch_material", "wear_and_age"],
+    "footpath": ["drainage", "utility_digging", "poor_patch_material", "wear_and_age"],
+    "drain": ["drainage", "utility_digging", "wear_and_age"],
+    "streetlight": ["electrical_fault", "wear_and_age"],
+    "toilet": ["wear_and_age"],
+}
+
+
+def allowed_causes(category: str) -> list:
+    return _ORDER.get(category, _ORDER["road"]) + ["unknown"]
 
 
 def tag_cause(clean_text: str, category: str):
     """clean_text must already be normalised (see textsim.normalise)."""
     text = clean_text or ""
-    for cause in _ORDER:
-        if cause == "electrical_fault" and category != "streetlight":
-            continue
+    for cause in _ORDER.get(category, _ORDER["road"]):
         pattern = _KEYWORDS[cause]
         if cause == "drainage" and category != "drain":
             pattern = pattern + r"|drain"  # for a road/footpath, a nearby drain is a cause

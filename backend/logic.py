@@ -218,7 +218,7 @@ def repair_durability(repairs, incidents):
 BREAK_EVEN_YEARS = 4         # replace if a permanent fix pays back within this many years of avoided patching
 
 
-def cost_comparison(asset, repairs, incidents_12m=0):
+def cost_comparison(asset, repairs, incidents_12m=0, incidents=None):
     temp = [r for r in repairs if r["repair_type"] == "temporary"]
     spent_total = sum(r["cost"] or 0 for r in temp)
     cutoff = now() - timedelta(days=365)
@@ -233,6 +233,19 @@ def cost_comparison(asset, repairs, incidents_12m=0):
         "recommendation": "monitor",
         "message": "Not enough repair history to compare.",
     }
+    # a permanent fix with no failure since then: the decision has been made, now monitor it
+    perm = [r for r in repairs if r["repair_type"] == "permanent"]
+    if perm:
+        last = max(perm, key=lambda r: r["completed_at"])
+        failed_since = any(parse(i["start"]) > parse(last["completed_at"]) for i in (incidents or []))
+        if not failed_since:
+            out["recommendation"] = "fixed"
+            out["fixed_on"] = last["completed_at"]
+            out["message"] = (
+                f"Fixed permanently on {parse(last['completed_at']).strftime('%d %b %Y')} by {last['contractor']} "
+                f"for ₹{(last['cost'] or 0):,.0f}. No failures since. Keep monitoring."
+            )
+            return out
     if replacement and spent_12m:
         out["years_to_break_even"] = round(replacement / spent_12m, 1)
         if spent_total >= replacement or (incidents_12m >= 3 and out["years_to_break_even"] <= BREAK_EVEN_YEARS):
@@ -344,7 +357,7 @@ def asset_state(conn, asset):
         "incidents_12m": len(inc_12m),
         "recurring": len(inc_12m) >= RECURRING_INCIDENTS,
         "cause": cause_summary(complaints, repairs, asset["type"]),
-        "cost": cost_comparison(asset, repairs, len(inc_12m)),
+        "cost": cost_comparison(asset, repairs, len(inc_12m), incidents),
         "durability": repair_durability(repairs, incidents),
         "window": failure_window(incidents),
         "priority": priority(asset, complaints, repairs, incidents),
