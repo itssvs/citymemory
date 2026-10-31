@@ -173,6 +173,6 @@ LIMITER = LoginLimiter()
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "same-origin",
+    "Referrer-Policy": "strict-origin-when-cross-origin",  # other sites see only our site address (map tiles need it)
     "Permissions-Policy": "camera=(self), geolocation=(self), microphone=()",
 }

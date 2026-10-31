@@ -55,7 +55,8 @@ export default function AssetMap({ assets, selected, onSelect, pin, onPick, heig
       <Attribution />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        referrerPolicy="strict-origin-when-cross-origin"
       />
       <Clicker onPick={onPick} />
       {fit && <FitTo assets={assets} />}
