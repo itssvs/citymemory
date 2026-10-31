@@ -1,0 +1,9 @@
+# Small install for free hosting (about 512 MB of memory): no PyTorch, no sentence-transformers.
+# Matching uses the built-in character n-gram text model (CITYMEMORY_EMBEDDER=hash).
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+httpx>=0.27
+Pillow>=10.0
+scikit-learn>=1.3
+numpy>=1.26

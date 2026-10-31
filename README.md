@@ -1,3 +1,14 @@
+---
+title: CityMemory
+emoji: 🏙️
+colorFrom: yellow
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Civic infrastructure history and failure prediction
+---
+
 # CityMemory
 
 **Intelligent civic infrastructure history and failure prediction** (Hackathon Problem Statement 9).
