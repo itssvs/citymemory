@@ -48,6 +48,7 @@ export const api = {
   assets: () => req('/api/assets'),
   priority: (limit = 20) => req(`/api/priority?limit=${limit}`),
   asset: (id) => req(`/api/assets/${encodeURIComponent(id)}`),
+  timeline: (query) => req(`/api/timeline?${query}`),
   search: (q) => req(`/api/search?q=${encodeURIComponent(q)}`),
   contractors: () => req('/api/contractors'),
   review: () => req('/api/review'),

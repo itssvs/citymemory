@@ -20,6 +20,7 @@ import security
 import llm
 import logic
 import patterns
+import timeline as timeline_mod
 import workorders
 from auth import ANY, CITIZEN, COMMISSIONER, ENGINEER, STAFF, require
 from causes import severity_from_text
@@ -339,6 +340,21 @@ def search(q: str = Query(..., min_length=2), limit: int = 25, user=Depends(STAF
     conn.close()
     out.sort(key=lambda x: (x["score"], x["date"] or ""), reverse=True)
     return out[:limit]
+
+
+@app.get("/api/timeline")
+def ward_timeline(start: Optional[str] = None, end: Optional[str] = None, types: Optional[str] = None,
+                  kinds: Optional[str] = None, asset_id: Optional[str] = None, q: Optional[str] = None,
+                  sort: str = "date", offset: int = Query(0, ge=0), limit: int = Query(40, ge=1, le=200),
+                  user=Depends(STAFF)):
+    """Every complaint, repair and repair job in the ward as one dated, filterable, searchable history."""
+    conn = get_conn()
+    try:
+        return timeline_mod.build(conn, start, end, types, kinds, asset_id, q, sort, offset, limit)
+    except timeline_mod.TimelineError as e:
+        raise HTTPException(422, str(e))
+    finally:
+        conn.close()
 
 
 @app.get("/api/contractors")

@@ -13,7 +13,7 @@ to stop patching and plan a permanent fix.
 
 | Brief asks for | Where it is |
 | --- | --- |
-| Searchable timeline of complaints, photos, dates, locations, asset IDs, repairs | Asset panel timeline, header search |
+| Searchable timeline of complaints, photos, dates, locations, asset IDs, repairs | **Timeline** page (engineer and commissioner): every complaint, repair and repair job in the ward, newest first, with photos; filter by date range, asset type, event kind or one asset; search by meaning, street or asset ID. Each complaint says which failure of its asset it started or repeated; each repair says how long it held. Also per asset in the asset panel |
 | AI identifies semantically similar complaints | Complaint matching: location + text similarity |
 | Cluster recurring incidents | Complaints grouped into failure incidents per asset; "recurring" flag; cause tags |
 | Estimate which assets deserve higher priority | Explainable 0-100 priority score with reasons |
@@ -125,6 +125,7 @@ frontend/
 | GET | `/api/patterns` | Recurring complaint patterns across the ward |
 | GET | `/api/assets/{id}/ai-summary` | AI briefing for one asset |
 | POST | `/api/ai/retag` | Re-tag all causes with the LLM |
+| GET | `/api/timeline?start=&end=&types=&kinds=&asset_id=&q=&sort=` | Ward timeline: filtered, searchable history of complaints, repairs and repair jobs |
 | GET | `/api/search?q=` | Search across assets, complaints and repairs |
 | GET | `/api/review` | Uncertain matches for engineer review |
 | POST | `/api/complaints/{id}/review` | Confirm, reassign or create a new asset |

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Ellipsis, HardHat, House, Map as MapIcon, Target, Waypoints } from 'lucide-react'
+import { Ellipsis, HardHat, House, History, Map as MapIcon, Target, Waypoints } from 'lucide-react'
 import { api, label } from '../api'
 import Patterns from '../components/Patterns'
-import { Contractors, Insights, SearchResults } from '../components/Views'
+import Timeline from '../components/Timeline'
+import { Contractors, Insights } from '../components/Views'
 import { Gauge, lakh, PillProgress, Seg, Shell, SplitBar, StatCard, TYPE_NAME, TypeBadge } from '../ui'
 import { AssetDrawer, AssetList, MapCard, useStaffData } from './staff'
 
@@ -163,9 +164,10 @@ export default function CommissionerApp({ user, onLogout }) {
   const [open, setOpen] = useState(null)
   const [search, setSearch] = useState('')
   const { assets, err } = useStaffData()
-  const go = (p) => { setPage(p); setSearch('') }
+  const go = (p) => { setPage(p); if (p !== 'timeline') setSearch('') }
   const nav = [
     ['overview', 'Overview', House],
+    ['timeline', 'Timeline', History],
     ['assets', 'Assets', MapIcon],
     ['patterns', 'Patterns', Waypoints],
     ['contractors', 'Contractors', HardHat],
@@ -173,12 +175,12 @@ export default function CommissionerApp({ user, onLogout }) {
   ]
   return (
     <Shell
-      user={user} nav={nav} page={search ? '' : page} setPage={go} onLogout={onLogout} onSearch={setSearch}
+      user={user} nav={nav} page={page} setPage={go} onLogout={onLogout} onSearch={page === 'timeline' ? undefined : (q) => { setSearch(q); setPage('timeline') }}
       subline="Where the ward's repair money goes, and where it keeps going."
       cta={<button className="btn-dark" onClick={() => go('contractors')}>Contractor report</button>}
     >
       {err && <div className="error-box">{err}</div>}
-      {search ? <SearchResults q={search} onOpenAsset={setOpen} onClear={() => setSearch('')} /> : (
+      {(
         <>
           {page === 'overview' && <Overview onOpen={setOpen} />}
           {page === 'assets' && (
@@ -187,6 +189,7 @@ export default function CommissionerApp({ user, onLogout }) {
               <div className="span-5"><AssetList assets={assets} selected={open} onOpen={setOpen} title="Assets by priority" sub="Read-only. Engineers verify complaints and log repairs." /></div>
             </div>
           )}
+          {page === 'timeline' && <Timeline initialQ={search} onOpenAsset={setOpen} />}
           {page === 'patterns' && <Patterns assets={assets} onOpenAsset={setOpen} />}
           {page === 'contractors' && <Contractors />}
           {page === 'prediction' && <Insights />}

@@ -197,7 +197,7 @@ export function Shell({ user, nav, page, setPage, subline, onSearch, cta, onLogo
               {onSearch && (
                 <form className="search-pill" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim().length > 1) onSearch(q.trim()) }}>
                   <Search size={18} aria-hidden="true" />
-                  <input aria-label="Search asset history" placeholder="Search asset history" value={q} onChange={(e) => setQ(e.target.value)} />
+                  <input aria-label="Search the ward timeline" placeholder="Search the ward timeline" value={q} onChange={(e) => setQ(e.target.value)} />
                 </form>
               )}
               {cta}

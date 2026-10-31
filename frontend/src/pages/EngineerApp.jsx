@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { ClipboardList, House, Inbox, Map as MapIcon, Waypoints } from 'lucide-react'
+import { ClipboardList, House, History, Inbox, Map as MapIcon, Waypoints } from 'lucide-react'
 import WorkOrders from '../components/WorkOrders'
 import Patterns from '../components/Patterns'
-import { ReviewQueue, SearchResults } from '../components/Views'
+import Timeline from '../components/Timeline'
+import { ReviewQueue } from '../components/Views'
 import { CalendarCard, Gauge, lakh, PillProgress, Shell, StatCard } from '../ui'
 import { AssetDrawer, AssetList, MapCard, useStaffData } from './staff'
 
@@ -13,11 +14,12 @@ export default function EngineerApp({ user, onLogout }) {
   const { assets, stats, err, refresh } = useStaffData()
   const [version, setVersion] = useState(0)
   const changed = () => { refresh(); setVersion((v) => v + 1) }
-  const go = (p) => { setPage(p); setSearch('') }
+  const go = (p) => { setPage(p); if (p !== 'timeline') setSearch('') }
 
   const pending = stats?.pending_review || 0
   const nav = [
     ['home', 'Today', House],
+    ['timeline', 'Timeline', History],
     ['jobs', 'Repair jobs', ClipboardList, (stats?.overdue_work_orders || 0) > 0],
     ['map', 'Ward map', MapIcon],
     ['review', 'Review queue', Inbox, pending > 0],
@@ -28,12 +30,12 @@ export default function EngineerApp({ user, onLogout }) {
 
   return (
     <Shell
-      user={user} nav={nav} page={search ? '' : page} setPage={go} onLogout={onLogout} onSearch={setSearch}
+      user={user} nav={nav} page={page} setPage={go} onLogout={onLogout} onSearch={page === 'timeline' ? undefined : (q) => { setSearch(q); setPage('timeline') }}
       subline="What keeps failing in the ward, and what to fix first."
       cta={<button className="btn-dark" onClick={() => go('review')}>Review matches{pending > 0 && <span className="count num">{pending}</span>}</button>}
     >
       {err && <div className="error-box">{err}</div>}
-      {search ? <SearchResults q={search} onOpenAsset={setOpen} onClear={() => setSearch('')} /> : (
+      {(
         <>
           {page === 'home' && stats && (
             <>
@@ -90,6 +92,7 @@ export default function EngineerApp({ user, onLogout }) {
               <div className="span-5"><AssetList assets={assets} selected={open} onOpen={setOpen} title="All assets" /></div>
             </div>
           )}
+          {page === 'timeline' && <Timeline initialQ={search} onOpenAsset={setOpen} version={version} />}
           {page === 'jobs' && <WorkOrders onOpen={setOpen} version={version} />}
           {page === 'review' && <ReviewQueue onChanged={refresh} onOpenAsset={setOpen} />}
           {page === 'patterns' && <Patterns assets={assets} onOpenAsset={setOpen} />}
